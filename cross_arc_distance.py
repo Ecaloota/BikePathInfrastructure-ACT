@@ -1,115 +1,107 @@
-import math
+#import math
+import numpy as np
+import pandas as pd
 
 ## Radius of spherical Earth, in metres
 EARTH_RADIUS = 6371*1000
 
-def to_radians(coordA : float) -> float:
-    """
-    Given a coordinate A, return A in radians.
-    """
-
-    return coordA * math.pi/180
-
-
-def get_bearing(latA : float, longA : float, latB : float, longB : float) -> float:
+def get_bearing_vectorised(latA, longA, latB, longB):
     """
     Given two points A and B with latitude and longitude in radians, return the initial bearing
     from A to B in radians.
     """
 
-    x = math.sin( longB - longA ) * math.cos( latB )
-    y = math.cos( latA ) * math.sin( latB ) - math.sin( latA ) * math.cos( latB ) * math.cos( longB - longA )
+    # TODO: Write a test for this.
+    dlong = longB - longA
 
-    return math.atan2(x, y)
+    x = np.sin( dlong ) * np.cos( latB )
+    y = np.cos( latA ) * np.sin( latB ) - np.sin( latA ) * np.cos( latB ) * np.cos( dlong )
+
+    return np.arctan2(x, y)
 
 
-def haversine_distance(latA : float, longA : float, latB : float, longB : float) -> float:
+def haversine_vectorised(latA, longA, latB, longB):
     """
     Given two points A and B with latitude and longitude in radians, return the haversine distance
-    between the two points in metres.
+    between the two points in metres. Vectorised for np.
+
+    i.e. haversine_vectorised(df1['x_lat'].values, df1['x_long'].values, df2['y_lat'].values, df2['y_long'].values)
     """
 
-    a = math.sin( (latB - latA) / 2 ) ** 2 + math.cos(latA) * math.cos(latB) * math.sin( ( longB - longA) / 2 ) ** 2
-    c = 2 * math.atan2( math.sqrt( a ), math.sqrt( 1-a ) )
+    # TODO: Write a test for this.
+
+    a = np.sin( ( latB - latA ) / 2 ) ** 2 + np.cos(latA) * np.cos(latB) * np.sin( ( longB - longA ) / 2 ) ** 2
+    c = 2 * np.arctan2( np.sqrt( a ), np.sqrt( 1-a ) )
     haversine_distance = EARTH_RADIUS * c
 
     return haversine_distance
+
+
+def cross_track_distance_vectorised(latA, longA, latB, longB, latC, longC):
+    """
+    Given two points A and B with latitude and longitude in radians on a great circle, and a third point C, calculate 
+    the haversine distance between the point C and the great circle intersecting points A and B.
+    """
+    # TODO: Write a test for this.
     
+    haversineAC = haversine_vectorised(latA, longA, latC, longC)
+    bearingAC = get_bearing_vectorised(latA, longA, latC, longC)
+    bearingAB = get_bearing_vectorised(latA, longA, latB, longB)
 
-def cross_track_distance(latA : float, longA : float, latB : float, longB : float, latC : float, longC : float) -> float:
+    return np.arcsin( np.sin( haversineAC / EARTH_RADIUS ) * np.sin( bearingAC - bearingAB ) ) * EARTH_RADIUS
+
+
+def cross_arc_distance_vectorised(latA, longA, latB, longB, latC, longC, max_consideration_distance = 1000):
     """
     Given two points A and B with latitude and longitude in radians on a great circle, and a third point C, calculate 
-    the (haversine?) distance between the point C and the great circle intersecting points A and B.
+    the haversine distance between the point C and the great circle line segment joining points A and B.
     """
 
-    haversineAC = haversine_distance(latA, longA, latC, longC)
-    bearingAC = get_bearing(latA, longA, latC, longC)
-    bearingAB = get_bearing(latA, longA, latB, longB)
+    # TODO: Write a test for this.
 
-    return math.asin( math.sin( haversineAC / EARTH_RADIUS ) * math.sin( bearingAC - bearingAB ) ) * EARTH_RADIUS
+    ## We consider every path to each particular light
 
+    ## Make a results array that we can return. It will contain the shortest (cross-arc) distance between every 
+    ## pair of points and the particular light of interest. This will be a column vector initialised with np.inf
+    result = np.full(np.shape(latA), np.inf) 
 
-def cross_arc_distance(latA : float, longA : float, latB : float, longB : float, latC : float, longC : float) -> float:
-    """
-    Given two points A and B with latitude and longitude in radians on a great circle, and a third point C, calculate 
-    the (haversine?) distance between the point C and the great circle line segment joining points A and B.
-    """
+    ## Calculate the two bearing arrays AB and AC, and compute the relative bearing array
+    bearingAB = get_bearing_vectorised(latA, longA, latB, longB)
+    bearingAC = get_bearing_vectorised(latA, longA, latC, longC)
+    relative_bearing = np.abs(bearingAC - bearingAB)
 
-    bearingAB = get_bearing(latA, longA, latB, longB)
-    bearingAC = get_bearing(latA, longA, latC, longC)
-    haversineAC = haversine_distance(latA, longA, latC, longC)
-    relative_bearing = abs(bearingAC - bearingAB)
+    ## Calculate the haversine AC distance array
+    haversineAC = haversine_vectorised(latA, longA, latC, longC)
 
-    if relative_bearing > math.pi:
-        relative_bearing = 2 * math.pi - relative_bearing
+    ## Are elements in the relative bearing array in the correct quadrant?
 
-    ## Is relative bearing obtuse?
-    if relative_bearing > math.pi/2:
-        return haversineAC
+    # At positions where the relative bearing is greater than pi in the relative bearing array,
+    # change the value to 2pi - the current value at those positions where relative bearing is 
+    # greater than pi
 
-    else:
-        ## Fimd the cross-track distance
-        dxt = cross_track_distance(latA, longA, latB, longB, latC, longC)
+    # TODO: Write a test for this!
+    relative_bearing[relative_bearing > np.pi] = 2 * np.pi - relative_bearing[relative_bearing > np.pi]
 
-        ## Is Point D beyond the arc?
-        haversineAB = haversine_distance(latA, longA, latB, longB)
-        haversineAD = math.acos( math.cos( haversineAC / EARTH_RADIUS ) / math.cos( dxt / EARTH_RADIUS ) ) * EARTH_RADIUS
+    ## Are elements in the relative bearing array, obtuse?
+    ## If so, set result array element at the corresponding positions to haversineAC
 
-        if haversineAD > haversineAB:
-            return haversine_distance(latB, longB, latC, longC)
-        else:
-            return abs(dxt)
+    # TODO: Write a test for this!
+    result[relative_bearing > np.pi/2] = haversineAC[relative_bearing > np.pi/2]
 
+    ## Find the cross-track distance array
+    dxt = cross_track_distance_vectorised(latA, longA, latB, longB, latC, longC)
 
-## CASE 1
-latA = -10.1 * math.pi/180
-longA = -55.5 * math.pi/180
-latB = -15.2 * math.pi/180
-longB = -45.1 * math.pi/180
-latC = -10.5 * math.pi/180
-longC = -62.5 * math.pi/180
+    ## Is pointD beyond the arc?
+    haversineAB = haversine_vectorised(latA, longA, latB, longB)
+    haversineBC = haversine_vectorised(latB, longB, latC, longC)
+    haversineAD = np.arccos( np.cos( haversineAC / EARTH_RADIUS ) / np.cos( dxt / EARTH_RADIUS ) ) * EARTH_RADIUS
 
-CASE1 = cross_arc_distance(latA, longA, latB, longB, latC, longC)
-print("CASE1: ", CASE1)
+    ## Are the elements of the haversineAD array larger than the haversineAB array?
+    ## If the elements of haversineAD > the corresponding elements of haversineAB
+    ## return haversineBC at those positions
+    result[haversineAD > haversineAB] = haversineBC[haversineAD > haversineAB]
+    
+    ## Else if haversineAD < haversineAB, return the absolute value of dxt at those positions
+    result[haversineAD < haversineAB] = np.abs(dxt[haversineAD < haversineAB])
 
-## CASE 2
-latA = 40.5 * math.pi/180
-longA = 60.5 * math.pi/180
-latB = 50.5 * math.pi/180
-longB = 80.5 * math.pi/180
-latC = 51.0 * math.pi/180
-longC = 69.0 * math.pi/180
-
-CASE2 = cross_arc_distance(latA, longA, latB, longB, latC, longC)
-print("CASE2: ", CASE2)
-
-## CASE 3
-latA = 21.72 * math.pi/180
-longA = 35.61 * math.pi/180
-latB = 23.65 * math.pi/180
-longB = 40.7 * math.pi/180
-latC = 25 * math.pi/180
-longC = 42 * math.pi/180
-
-CASE3 = cross_arc_distance(latA, longA, latB, longB, latC, longC)
-print("CASE3: ", CASE3)
+    return result
