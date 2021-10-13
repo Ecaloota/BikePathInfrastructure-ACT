@@ -11,7 +11,7 @@ def get_data_from_client():
                          username=secrets.username,
                          password=secrets.password)
 
-    except ModuleNotFoundError:
+    except (ModuleNotFoundError, AttributeError):
         client = Socrata("www.data.act.gov.au", None)
 
     street_light_dataset = client.get("n9u5-bt96", limit=100000)
